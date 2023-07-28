@@ -98,7 +98,6 @@ class Syncer:
                     if self.allow_linking:
                         logging.info("Found Manufacturer {} by name. Updating custom field instead.".format(snipe_manuf['name']))
                         self.netbox.dcim.manufacturers.update([{"id": present_nb_manuf["id"],
-                                                                "description": self.desc.replace("Imported", "Updated"),
                                                                 "custom_fields": {KEY_CUSTOM_FIELD: snipe_manuf['id']}}])
                     else:
                         logging.info("Found Manufacturer {} by name. Skipping, since linking is not enabled.".format(snipe_manuf['name']))
@@ -107,8 +106,7 @@ class Syncer:
                 if self.allow_updates:
                     logging.info("The Manufacturer {} is present, updating Item".format(snipe_manuf['name']))
                     self.netbox.dcim.manufacturers.update([{"id": present_nb_manuf["id"], "name": snipe_manuf['name'],
-                                                            "slug": Syncer.slugify(snipe_manuf['name']),
-                                                            "description": self.desc.replace("Imported", "Updated")}])
+                                                            "slug": Syncer.slugify(snipe_manuf['name'])}])
                 else:
                     logging.info("The Manufacturer {} is changed. Skipping since updating is not enabled.".format(snipe_manuf['name']))
 
@@ -147,8 +145,11 @@ class Syncer:
                 else:
                     # Found Device Type by Mode+Manufacturer, so update the Custom Field ID-Value for proper linking
                     if self.allow_linking:
-                        update_obj = update_obj | {"id": present_nb_devtype["id"], "custom_fields": {KEY_CUSTOM_FIELD: model['id']}}
+                        update_obj = update_obj | {"id": present_nb_devtype["id"],
+                                                   "custom_fields": {KEY_CUSTOM_FIELD: model['id']},
+                                                   "comments": self.__gen_update_comment(present_nb_devtype['comments'], "Snipe ID")}
                         logging.info("Found Device Type {} by Model and Manufacturer Name. Updating custom field.".format(model['name']))
+                        self.netbox.dcim.device_types.update([update_obj])
                     else:
                         logging.info("Found Device Type {} by name. Skipping, since linking is not enabled.".format(model['name']))
 
@@ -167,14 +168,18 @@ class Syncer:
                 if "id" in update_obj:
                     if self.allow_updates:
                         logging.info("The Device Type {} has changed, updating Item".format(model['name']))
+                        update_obj = update_obj | {"comments": self.__gen_update_comment(present_nb_devtype['comments'], "Values")}
+                        self.netbox.dcim.device_types.update([update_obj])
                     else:
                         logging.info("The Device Type {} has changed. Skipping since updating is not enabled.".format(model['name']))
 
 
-            # check if the Device Type needs an Update and write it to the API
-            if "id" in update_obj and self.allow_updates:
-                update_obj = update_obj | {"description": self.desc.replace("Imported", "Updated")}
-                self.netbox.dcim.device_types.update([update_obj])
+
+    def __gen_update_comment(self, old_comment: str, suffix: str = None):
+        val = old_comment + '\r\n\r\n' + self.desc.replace("Imported", "Updated")
+        if suffix is not None:
+            val += " (" + suffix + ")"
+        return val
 
     def sync_sites(self, top_locations):
         netbox_sites = list(self.netbox.dcim.sites.all())
@@ -196,7 +201,7 @@ class Syncer:
                     if self.allow_linking:
                         logging.info("Found Site {} by name. Updating custom field instead.".format(location['name']))
                         self.netbox.dcim.sites.update([{"id": present_nb_devtype["id"],
-                                                        "comments": present_nb_devtype['comments'] + '\r\n\r\n' + self.desc.replace("Imported", "Updated") + " (Snipe ID)",
+                                                        "comments": self.__gen_update_comment(present_nb_devtype['comments'], "Snipe ID"),
                                                         "custom_fields": {KEY_CUSTOM_FIELD: location['id']}}])
                     else:
                         logging.info("Found Site {} by name. Skipping, since linking is not enabled.".format(location['name']))
@@ -206,7 +211,7 @@ class Syncer:
                     logging.info("The Site {} is present, updating Item".format(location['name']))
                     self.netbox.dcim.sites.update([{"id": present_nb_devtype["id"], "name": location['name'],
                                                     "slug": Syncer.slugify(location['name']),
-                                                    "comments": present_nb_devtype['comments'] + '\r\n\r\n' + self.desc.replace("Imported", "Updated") + " (Values)",
+                                                    "comments": self.__gen_update_comment(present_nb_devtype['comments'],"Values"),
                                                     }])
                 else:
                     logging.info("The Site {} is changed. Skipping since updating is not enabled.".format(location['name']))

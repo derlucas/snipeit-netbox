@@ -27,9 +27,9 @@ if __name__ == "__main__":
     # snipe_companies = snipe.get_companies()
     # syncer.sync_companies_to_tenants(snipe_companies)
 
-    # snipe_manufacturers, snipe_models = snipe.get_models_and_manufacturers_with_mac()
-    # syncer.sync_manufacturers(snipe_manufacturers)
-    # syncer.sync_device_types(snipe_models)
+    snipe_manufacturers, snipe_models = snipe.get_models_and_manufacturers_with_mac()
+    syncer.sync_manufacturers(snipe_manufacturers)
+    syncer.sync_device_types(snipe_models)
 
     # assets = snipe.get_assets_with_mac()
     # for asset in assets:
