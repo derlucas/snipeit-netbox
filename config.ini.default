@@ -1,0 +1,5 @@
+[config]
+snipe_token =
+snipe_url = https://localhost:3000/
+netbox_token =
+netbox_url = http://localhost:8000/
