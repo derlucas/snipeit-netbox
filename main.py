@@ -32,11 +32,8 @@ if __name__ == "__main__":
     # syncer.sync_device_types(snipe_models)
 
     locations = snipe.get_locations()
-    # the top locations without a parent will be the Sites in NetBox
-    top_locations = list(filter(lambda s: s['parent'] is None, locations))
-    syncer.sync_sites(top_locations)
+    syncer.sync_sites(locations)
 
-    locations = list(filter(lambda s: s['parent'] is not None, locations))
     syncer.sync_locations(locations)
 
 

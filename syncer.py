@@ -182,11 +182,14 @@ class Syncer:
             val += " (" + suffix + ")"
         return val
 
-    def sync_sites(self, top_locations):
+    def sync_sites(self, locations):
         netbox_sites = list(self.netbox.dcim.sites.all())
 
+        # the top locations without a parent will be the Sites in NetBox
+        top_locations = list(filter(lambda s: s['parent'] is None, locations))
+
         for location in top_locations:
-            logging.info("Checking Top Location {}".format(location['name']))
+            logging.info("Checking Top Location as Site: {}".format(location['name']))
 
             present_nb_site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
             if present_nb_site is None:
@@ -218,15 +221,35 @@ class Syncer:
                     logging.info("The Site {} is changed. Skipping since updating is not enabled.".format(location['name']))
 
 
-    def __sync_location_toplevel(self, netbox_sites, netbox_locations, location):
-        # try to find the site, since this location is top level: just use the parent
-        site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['parent']['id']), None)
+    def __sync_location(self, netbox_sites, netbox_locations, locations_with_parents, location):
+        logging.info("Checking Location {}".format(location['name']))
+        # try to find the site
+        parent = location['parent']
+        site = None
+
+        # traverse up the tree to find the top location which is the Site
+        while site is None:
+            if parent is not None:
+                logging.info("parent: {}".format(parent['name']))
+                site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == parent['id']), None)
+            else:
+                logging.error("can not find the Site for Location {}".format(location['name']))
+                return
+
+            parent_item = next((item for item in locations_with_parents if item['id'] == parent['id']), None)
+            if parent_item is not None:
+                parent = parent_item['parent']
+            else:
+                parent = None
+
+
+        logging.info("Site for Location {} will be {}".format(location['name'], site['name']))
 
         # check if we can find the location by Snipe ID
         present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
 
         if present_nb_loc is None:
-            # Location is unique by Name within a Site, try find it
+            # not found by ID, so Location is unique by Name within a Site, try find it
             present_nb_loc = next((item for item in netbox_locations if item["name"] == location['name'] and item['site']['id'] == site['id']), None)
 
             if present_nb_loc is None:
@@ -245,16 +268,26 @@ class Syncer:
             # is present, so check if changed and we may update
             if present_nb_loc['name'] != location['name'] or present_nb_loc['site']['id'] != site['id']:
                 if self.allow_updates:
-                    logging.info("The Location {} is changed, updating Item".format(location['name']))
+                    logging.info("The Location {} has changed, updating Item".format(location['name']))
                     self.netbox.dcim.locations.update([{"id": present_nb_loc["id"], "name": location['name'],
                                                         "site": site['id'],
                                                         "slug": Syncer.slugify(location['name'])
                                                         }])
                 else:
-                    logging.info("The Location {} is changed. Skipping since updating is not enabled.".format(location['name']))
+                    logging.info("The Location {} has changed. Skipping since updating is not enabled.".format(location['name']))
 
 
 
+    def __sync_location_relationships(self, netbox_sites, sub_locations):
+
+        # get them fresh from the API
+        netbox_locations = list(self.netbox.dcim.locations.all())
+
+        for snipe_location in sub_locations:
+            # ToDo
+
+
+            pass
 
 
 
@@ -262,62 +295,20 @@ class Syncer:
         netbox_locations = list(self.netbox.dcim.locations.all())
         netbox_sites = list(self.netbox.dcim.sites.all())
 
-        locations_top_level = []
-        sub_locations = []
+        snipe_locations_with_parent = list(filter(lambda s: s['parent'] is not None, locations))
 
-        for location in locations:
-            # logging.info("Checking Location {}".format(location['name']))
-            parent = location['parent']
-            assert parent is not None
+        snipe_sub_locations = []
 
-            if next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == parent['id']), None) is not None:
-                locations_top_level.append(location)
-            else:
-                sub_locations.append(location)
+        for snipe_location in snipe_locations_with_parent:
+            # check if the locations's parent is a NetBox Site, then it is considered a top level Location
+            if next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['parent']['id']), None) is None:
+                snipe_sub_locations.append(snipe_location)
 
 
-        print("top level:")
-        for location in locations_top_level:
-            # print("   " + location['name'])
-            self.__sync_location_toplevel(netbox_sites, netbox_locations, location)
+        for snipe_location in snipe_locations_with_parent:
+            self.__sync_location(netbox_sites, netbox_locations, snipe_locations_with_parent, snipe_location)
 
-        print("sub:")
-        for location in sub_locations:
-            # print("   " + location['name'])
-            # Todo
-            pass
-
-
-            # present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
-            # if present_nb_loc is None:
-            #     # Location is unique by Name within a Site
-            #     present_nb_loc = next((item for item in netbox_locations if item["name"] == location['name']
-            #                            and item['site']['id'] == parent['id']), None)
-            #
-            #     if present_nb_loc is None:
-            #         logging.info("Adding Location {} to netbox".format(location['name']))
-            #         self.netbox.dcim.locations.create(name=location['name'], slug=Syncer.slugify(location['name']),
-            #                                           description=self.desc, status='active',
-            #                                           custom_fields={KEY_CUSTOM_FIELD: location['id']})
-            #     else:
-            #         if self.allow_linking:
-            #             logging.info("Found Location {} by name. Updating custom field instead.".format(location['name']))
-            #             self.netbox.dcim.locations.update([{"id": present_nb_loc["id"],
-            #                                                 "comments": self.__gen_update_comment(present_nb_loc['comments'], "Snipe ID"),
-            #                                                 "custom_fields": {KEY_CUSTOM_FIELD: location['id']}}])
-            #         else:
-            #             logging.info("Found Location {} by name. Skipping, since linking is not enabled.".format(location['name']))
-            #
-            # elif present_nb_loc['name'] != location['name']:
-            #     if self.allow_updates:
-            #         logging.info("The Location {} is present, updating Item".format(location['name']))
-            #         self.netbox.dcim.locations.update([{"id": present_nb_loc["id"], "name": location['name'],
-            #                                             "slug": Syncer.slugify(location['name']),
-            #                                             "comments": self.__gen_update_comment(present_nb_loc['comments'], "Values"),
-            #                                             }])
-            #     else:
-            #         logging.info("The Location {} is changed. Skipping since updating is not enabled.".format(location['name']))
-            #
+        self.__sync_location_relationships(netbox_sites, snipe_sub_locations)
 
 
 
