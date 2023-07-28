@@ -43,7 +43,7 @@ Deleted Items in SnipeIt will NOT be deleted from NetBox.
 
 The software will only sync Device Types (and thus Devices) with a MAC field set assigned in SnipeIt.
 
-Snipe Manufacturers are synced to NetBox Manufacturers
-Snipe Asset Models are synced to NetBox Device Types
-Snipe Companies are synced to NetBox Tenants
-Snipe Locations without a parent Location are synced to Netbox Sites
+- Snipe Manufacturers are synced to NetBox Manufacturers
+- Snipe Asset Models are synced to NetBox Device Types
+- Snipe Companies are synced to NetBox Tenants
+- Snipe Locations without a parent Location are synced to Netbox Sites
