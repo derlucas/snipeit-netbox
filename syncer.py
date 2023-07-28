@@ -41,7 +41,6 @@ class Syncer:
             cufi = cufi | {"id": field['id']}
             self.netbox.extras.custom_fields.update([cufi])
 
-
     def sync_companies_to_tenants(self, snipe_companies):
         netbox_tenants = list(self.netbox.tenancy.tenants.all())
         desc = "Imported from SnipeIT {}".format(datetime.now(timezone.utc).strftime("%y-%m-%d %H:%M:%S (UTC)"))
@@ -77,7 +76,6 @@ class Syncer:
                 else:
                     logging.info("The Tenant {} is changed. Skipping since updating is not enabled.".format(snipe_company['name']))
 
-
     def sync_manufacturers(self, snipe_manufacturers):
         netbox_manufacturers = list(self.netbox.dcim.manufacturers.all())
 
@@ -112,7 +110,7 @@ class Syncer:
                     logging.info("The Manufacturer {} is changed. Skipping since updating is not enabled.".format(snipe_manuf['name']))
 
 
-    def sync_device_types(self, snipe_models):
+    def sync_models_to_device_types(self, snipe_models):
         netbox_device_types = list(self.netbox.dcim.device_types.all())
         netbox_manufacturers = list(self.netbox.dcim.manufacturers.all())
 
@@ -174,15 +172,13 @@ class Syncer:
                     else:
                         logging.info("The Device Type {} has changed. Skipping since updating is not enabled.".format(model['name']))
 
-
-
     def __gen_update_comment(self, old_comment: str, suffix: str = None):
         val = old_comment + '\r\n\r\n' + self.desc.replace("Imported", "Updated")
         if suffix is not None:
             val += " (" + suffix + ")"
         return val
 
-    def sync_sites(self, locations):
+    def sync_top_locations_to_sites(self, locations):
         netbox_sites = list(self.netbox.dcim.sites.all())
 
         # the top locations without a parent will be the Sites in NetBox
@@ -219,7 +215,6 @@ class Syncer:
                                                     }])
                 else:
                     logging.info("The Site {} is changed. Skipping since updating is not enabled.".format(location['name']))
-
 
     def __sync_location(self, netbox_sites, netbox_locations, locations_with_parents, location):
         logging.info("Checking Location {}".format(location['name']))
@@ -276,8 +271,6 @@ class Syncer:
                 else:
                     logging.info("The Location {} has changed. Skipping since updating is not enabled.".format(location['name']))
 
-
-
     def __sync_location_relationships(self, sub_locations):
         # get them fresh from the API
         netbox_locations = list(self.netbox.dcim.locations.all())
@@ -299,7 +292,6 @@ class Syncer:
         # update all at once
         self.netbox.dcim.locations.update(updates)
 
-
     def sync_locations(self, locations):
         netbox_locations = list(self.netbox.dcim.locations.all())
         netbox_sites = list(self.netbox.dcim.sites.all())
@@ -318,6 +310,11 @@ class Syncer:
             self.__sync_location(netbox_sites, netbox_locations, snipe_locations_with_parent, snipe_location)
 
         self.__sync_location_relationships(snipe_sub_locations)
+
+    def sync_assets_to_devices(self, snipe_assets):
+
+
+        pass
 
 
 

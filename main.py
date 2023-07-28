@@ -29,16 +29,15 @@ if __name__ == "__main__":
 
     snipe_manufacturers, snipe_models = snipe.get_models_and_manufacturers_with_mac()
     syncer.sync_manufacturers(snipe_manufacturers)
-    syncer.sync_device_types(snipe_models)
+    syncer.sync_models_to_device_types(snipe_models)
 
     locations = snipe.get_locations()
-    syncer.sync_sites(locations)
+    syncer.sync_top_locations_to_sites(locations)
     syncer.sync_locations(locations)
 
 
-
-
-    # assets = snipe.get_assets_with_mac()
+    assets = snipe.get_assets_with_mac()
+    syncer.sync_assets_to_devices(assets)
     # for asset in assets:
     #     print("{} {}".format(asset['asset_tag'], asset['name']))
 
