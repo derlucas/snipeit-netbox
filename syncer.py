@@ -15,6 +15,7 @@ class Syncer:
         self.snipe = snipe
         self.allow_updates = allow_updates
         self.allow_linking = allow_linking
+        self.desc = "Imported from SnipeIT {}".format(datetime.now(timezone.utc).strftime("%y-%m-%d %H:%M:%S (UTC)"))
 
 
     @staticmethod
@@ -24,11 +25,11 @@ class Syncer:
         return re.sub(r"[-\s]+", "-", value).strip("-_")
 
 
-    def ensure_netbox_custom_field(self):
-        content_types = ['dcim.device', 'dcim.devicerole', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'tenancy.tenant']
+    def ensure_netbox_custom_field(self, lock: bool = False):
+        content_types = ['dcim.device', 'dcim.devicerole', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'dcim.site', 'tenancy.tenant']
         cufi = {"name": KEY_CUSTOM_FIELD, "display": "Snipe object id", "content_types": content_types,
                 "description": "The ID of the original SnipeIT Object used for Sync",
-                "type": "integer", "ui_visibility": "read-only"}
+                "type": "integer", "ui_visibility": "read-only" if lock else "read-write"}
 
         field = self.netbox.extras.custom_fields.get(name=KEY_CUSTOM_FIELD)
         if field is None:
@@ -78,7 +79,6 @@ class Syncer:
 
     def sync_manufacturers(self, snipe_manufacturers):
         netbox_manufacturers = list(self.netbox.dcim.manufacturers.all())
-        desc = "Imported from SnipeIT {}".format(datetime.now(timezone.utc).strftime("%y-%m-%d %H:%M:%S (UTC)"))
 
         for snipe_manuf in snipe_manufacturers:
             logging.info("Checking Manufacturer {}".format(snipe_manuf['name']))
@@ -92,13 +92,13 @@ class Syncer:
                 if present_nb_manuf is None:
                     logging.info("Adding Manufacturer {} to netbox".format(snipe_manuf['name']))
                     self.netbox.dcim.manufacturers.create(name=snipe_manuf['name'], slug=Syncer.slugify(snipe_manuf['name']),
-                                                          description=desc,
+                                                          description=self.desc,
                                                           custom_fields={KEY_CUSTOM_FIELD: snipe_manuf['id']})
                 else:
                     if self.allow_linking:
                         logging.info("Found Manufacturer {} by name. Updating custom field instead.".format(snipe_manuf['name']))
                         self.netbox.dcim.manufacturers.update([{"id": present_nb_manuf["id"],
-                                                                "description": desc.replace("Imported", "Updated"),
+                                                                "description": self.desc.replace("Imported", "Updated"),
                                                                 "custom_fields": {KEY_CUSTOM_FIELD: snipe_manuf['id']}}])
                     else:
                         logging.info("Found Manufacturer {} by name. Skipping, since linking is not enabled.".format(snipe_manuf['name']))
@@ -108,14 +108,13 @@ class Syncer:
                     logging.info("The Manufacturer {} is present, updating Item".format(snipe_manuf['name']))
                     self.netbox.dcim.manufacturers.update([{"id": present_nb_manuf["id"], "name": snipe_manuf['name'],
                                                             "slug": Syncer.slugify(snipe_manuf['name']),
-                                                            "description": desc.replace("Imported", "Updated")}])
+                                                            "description": self.desc.replace("Imported", "Updated")}])
                 else:
                     logging.info("The Manufacturer {} is changed. Skipping since updating is not enabled.".format(snipe_manuf['name']))
 
 
     def sync_device_types(self, snipe_models):
         netbox_device_types = list(self.netbox.dcim.device_types.all())
-        desc = "Imported from SnipeIT {}".format(datetime.now(timezone.utc).strftime("%y-%m-%d %H:%M:%S (UTC)"))
         netbox_manufacturers = list(self.netbox.dcim.manufacturers.all())
 
         for model in snipe_models:
@@ -137,7 +136,7 @@ class Syncer:
                     logging.info("Adding Device Type {} to netbox".format(model['name']))
 
                     self.netbox.dcim.device_types.create(slug=Syncer.slugify(model['name']),
-                                                         description=desc, model=model['name'],
+                                                         description=self.desc, model=model['name'],
                                                          part_number=model['model_number'],
                                                          manufacturer=manuf_by_model.id,
                                                          custom_fields={KEY_CUSTOM_FIELD: model['id']},
@@ -174,6 +173,43 @@ class Syncer:
 
             # check if the Device Type needs an Update and write it to the API
             if "id" in update_obj and self.allow_updates:
-                update_obj = update_obj | {"description": desc.replace("Imported", "Updated")}
+                update_obj = update_obj | {"description": self.desc.replace("Imported", "Updated")}
                 self.netbox.dcim.device_types.update([update_obj])
+
+    def sync_sites(self, top_locations):
+        netbox_sites = list(self.netbox.dcim.sites.all())
+
+        for location in top_locations:
+            logging.info("Checking Top Location {}".format(location['name']))
+
+            present_nb_devtype = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
+            if present_nb_devtype is None:
+                # Site is unique by Name
+                present_nb_devtype = next((item for item in netbox_sites if item["name"] == location['name']), None)
+
+                if present_nb_devtype is None:
+                    logging.info("Adding Site {} to netbox".format(location['name']))
+                    self.netbox.dcim.sites.create(name=location['name'], slug=Syncer.slugify(location['name']),
+                                                  description=self.desc, status='active',
+                                                  custom_fields={KEY_CUSTOM_FIELD: location['id']})
+                else:
+                    if self.allow_linking:
+                        logging.info("Found Site {} by name. Updating custom field instead.".format(location['name']))
+                        self.netbox.dcim.sites.update([{"id": present_nb_devtype["id"],
+                                                        "comments": present_nb_devtype['comments'] + '\r\n\r\n' + self.desc.replace("Imported", "Updated") + " (Snipe ID)",
+                                                        "custom_fields": {KEY_CUSTOM_FIELD: location['id']}}])
+                    else:
+                        logging.info("Found Site {} by name. Skipping, since linking is not enabled.".format(location['name']))
+
+            elif present_nb_devtype['name'] != location['name']:
+                if self.allow_updates:
+                    logging.info("The Site {} is present, updating Item".format(location['name']))
+                    self.netbox.dcim.sites.update([{"id": present_nb_devtype["id"], "name": location['name'],
+                                                    "slug": Syncer.slugify(location['name']),
+                                                    "comments": present_nb_devtype['comments'] + '\r\n\r\n' + self.desc.replace("Imported", "Updated") + " (Values)",
+                                                    }])
+                else:
+                    logging.info("The Site {} is changed. Skipping since updating is not enabled.".format(location['name']))
+
+
 

@@ -1,5 +1,7 @@
+import logging
 import math
 import requests
+
 
 class Snipe:
     def __init__(self, url: str, token: str):
@@ -10,16 +12,55 @@ class Snipe:
                         'content-type': 'application/json'}
 
 
-    def __get_models(self, session: requests.Session):
-        response = session.get(self.url + "models", params={'limit': 100, 'offset': 0},
+    def __get_paged_items(self, session: requests.Session, endpoint: str, pagesize: int = 100):
+        response = session.get(self.url + endpoint, params={'limit': pagesize, 'offset': 0},
                                headers=self.headers).json()
         yield response
-        num_pages = math.ceil(response['total'] / 100)
+        num_pages = math.ceil(response['total'] / pagesize)
 
         for page in range(1, num_pages):
-            next_page = session.get(self.url + "models", params={'limit': 100, 'offset': page * 100},
+            next_page = session.get(self.url + endpoint, params={'limit': pagesize, 'offset': page * pagesize},
                                     headers=self.headers).json()
             yield next_page
+
+    @staticmethod
+    def __custom_fields_has_mac_type(custom_fields: dict):
+        for field in custom_fields.values():
+            if field['field_format'].lower() == "mac":
+                return True
+        return False
+
+
+    def get_locations(self):
+        session = requests.Session()
+
+        locations = []
+        for page in self.__get_paged_items(session, "locations", pagesize=200):
+            for location in page['rows']:
+                if location not in locations:
+                    locations.append(location)
+
+        locations = sorted(locations, key=lambda d: d['name'])
+        return locations
+
+    def get_assets_with_mac(self):
+        session = requests.Session()
+        fieldsets = self.__get_fieldsets_with_mac(session)
+
+        # i don't know an easy way to fetch only assets with mac fieldsets, so we have to get everything and filter locally
+
+        assets = []
+        for page in self.__get_paged_items(session, "hardware", pagesize=200):
+            print("Page {}".format(len(page['rows'])))
+            for asset in page['rows']:
+                if Snipe.__custom_fields_has_mac_type(asset['custom_fields']):
+                    if asset not in assets:
+                        assets.append(asset)
+
+
+        assets = sorted(assets, key=lambda d: d['asset_tag'])
+        return assets
+
 
     def get_models_and_manufacturers_with_mac(self):
         session = requests.Session()
@@ -29,7 +70,7 @@ class Snipe:
         manufacturers = []
         models = []
 
-        for page in self.__get_models(session):
+        for page in self.__get_paged_items(session, "models"):
             for model in page['rows']:
                 if model['fieldset'] is not None and model['fieldset']['id'] in fieldsets:
 

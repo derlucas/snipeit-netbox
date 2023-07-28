@@ -46,3 +46,4 @@ The software will only sync Device Types (and thus Devices) with a MAC field set
 Snipe Manufacturers are synced to NetBox Manufacturers
 Snipe Asset Models are synced to NetBox Device Types
 Snipe Companies are synced to NetBox Tenants
+Snipe Locations without a parent Location are synced to Netbox Sites
