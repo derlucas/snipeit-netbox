@@ -230,7 +230,7 @@ class Syncer:
         # traverse up the tree to find the top location which is the Site
         while site is None:
             if parent is not None:
-                logging.info("parent: {}".format(parent['name']))
+                logging.debug("parent: {}".format(parent['name']))
                 site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == parent['id']), None)
             else:
                 logging.error("can not find the Site for Location {}".format(location['name']))
@@ -243,7 +243,7 @@ class Syncer:
                 parent = None
 
 
-        logging.info("Site for Location {} will be {}".format(location['name'], site['name']))
+        logging.debug("Site for Location {} will be {}".format(location['name'], site['name']))
 
         # check if we can find the location by Snipe ID
         present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
@@ -279,16 +279,25 @@ class Syncer:
 
 
     def __sync_location_relationships(self, netbox_sites, sub_locations):
-
         # get them fresh from the API
         netbox_locations = list(self.netbox.dcim.locations.all())
+        updates = []
 
         for snipe_location in sub_locations:
-            # ToDo
+            present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['id']), None)
+            assert present_nb_loc is not None
+            present_nb_parent_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['parent']['id']), None)
+            assert present_nb_parent_loc is not None
 
+            if present_nb_loc['parent']['id'] != present_nb_parent_loc['id']:
+                if self.allow_updates:
+                    logging.info("The Location {} has changed, updating Item".format(present_nb_loc['name']))
+                    updates.append({"id": present_nb_loc["id"], "parent": present_nb_parent_loc['id']})
+                else:
+                    logging.info("The Location {} has changed. Skipping since updating is not enabled.".format(present_nb_loc['name']))
 
-            pass
-
+        # update all at once
+        self.netbox.dcim.locations.update(updates)
 
 
     def sync_locations(self, locations):
