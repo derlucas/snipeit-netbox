@@ -278,7 +278,7 @@ class Syncer:
 
 
 
-    def __sync_location_relationships(self, netbox_sites, sub_locations):
+    def __sync_location_relationships(self, sub_locations):
         # get them fresh from the API
         netbox_locations = list(self.netbox.dcim.locations.all())
         updates = []
@@ -317,7 +317,7 @@ class Syncer:
         for snipe_location in snipe_locations_with_parent:
             self.__sync_location(netbox_sites, netbox_locations, snipe_locations_with_parent, snipe_location)
 
-        self.__sync_location_relationships(netbox_sites, snipe_sub_locations)
+        self.__sync_location_relationships(snipe_sub_locations)
 
 
 
