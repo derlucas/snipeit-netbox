@@ -39,9 +39,10 @@ class Syncer:
             cufi = cufi | {"id": field['id']}
             self.netbox.extras.custom_fields.update([cufi])
 
+
     def sync_companies_to_tenants(self, snipe_companies):
         netbox_tenants = list(self.netbox.tenancy.tenants.all())
-        comment = "Imported from SnipeIT {}".format(datetime.now(timezone.utc).strftime("%y-%m-%d %H:%M:%S (UTC)"))
+        desc = "Imported from SnipeIT {}".format(datetime.now(timezone.utc).strftime("%y-%m-%d %H:%M:%S (UTC)"))
 
         for snipe_company in snipe_companies:
             logging.info("Checking Company {}".format(snipe_company['name']))
@@ -54,14 +55,14 @@ class Syncer:
                     logging.info("Adding Tenant {} to netbox.".format(snipe_company['name']))
                     self.netbox.tenancy.tenants.create(name=snipe_company['name'],
                                                        slug=Syncer.slugify(snipe_company['name']),
-                                                       comments=comment,
+                                                       description=desc,
                                                        custom_fields={KEY_CUSTOM_FIELD: snipe_company['id']})
                 else:
                     if self.allow_linking:
                         logging.info("Found Tenant {} by name. Updating custom field instead.".format(snipe_company['name']))
                         self.netbox.tenancy.tenants.update([{"id": present_nb_tenant["id"],
-                                                                "description": comment.replace("Imported", "Updated"),
-                                                                "custom_fields": {KEY_CUSTOM_FIELD: snipe_company['id']}}])
+                                                             "description": desc.replace("Imported", "Updated"),
+                                                             "custom_fields": {KEY_CUSTOM_FIELD: snipe_company['id']}}])
                     else:
                         logging.info("Found Tenant {} by name. Skipping, since linking is not enabled.".format(snipe_company['name']))
 
@@ -70,9 +71,10 @@ class Syncer:
                     logging.info("The Tenant {} is present, updating Item".format(snipe_company['name']))
                     self.netbox.tenancy.tenants.update([{"id": present_nb_tenant["id"], "name": snipe_company['name'],
                                                          "slug": Syncer.slugify(snipe_company['name']),
-                                                         "description": comment.replace("Imported", "Updated")}])
+                                                         "description": desc.replace("Imported", "Updated")}])
                 else:
                     logging.info("The Tenant {} is changed. Skipping since updating is not enabled.".format(snipe_company['name']))
+
 
     def sync_manufacturers(self, snipe_manufacturers):
         netbox_manufacturers = list(self.netbox.dcim.manufacturers.all())
