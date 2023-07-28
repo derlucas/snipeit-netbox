@@ -27,17 +27,23 @@ if __name__ == "__main__":
     # snipe_companies = snipe.get_companies()
     # syncer.sync_companies_to_tenants(snipe_companies)
 
-    snipe_manufacturers, snipe_models = snipe.get_models_and_manufacturers_with_mac()
-    syncer.sync_manufacturers(snipe_manufacturers)
-    syncer.sync_device_types(snipe_models)
+    # snipe_manufacturers, snipe_models = snipe.get_models_and_manufacturers_with_mac()
+    # syncer.sync_manufacturers(snipe_manufacturers)
+    # syncer.sync_device_types(snipe_models)
+
+    locations = snipe.get_locations()
+    # the top locations without a parent will be the Sites in NetBox
+    top_locations = list(filter(lambda s: s['parent'] is None, locations))
+    syncer.sync_sites(top_locations)
+
+    locations = list(filter(lambda s: s['parent'] is not None, locations))
+    syncer.sync_locations(locations)
+
+
+
+
 
     # assets = snipe.get_assets_with_mac()
     # for asset in assets:
     #     print("{} {}".format(asset['asset_tag'], asset['name']))
-
-    locations = snipe.get_locations()
-    top_locations = list(filter(lambda s: s['parent'] is None, locations))
-    # the top locations without a parent will be the Sites in NetBox
-    syncer.sync_sites(top_locations)
-
 

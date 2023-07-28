@@ -26,7 +26,8 @@ class Syncer:
 
 
     def ensure_netbox_custom_field(self, lock: bool = False):
-        content_types = ['dcim.device', 'dcim.devicerole', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'dcim.site', 'tenancy.tenant']
+        content_types = ['dcim.device', 'dcim.devicerole', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'dcim.site',
+                         'dcim.location', 'tenancy.tenant']
         cufi = {"name": KEY_CUSTOM_FIELD, "display": "Snipe object id", "content_types": content_types,
                 "description": "The ID of the original SnipeIT Object used for Sync",
                 "type": "integer", "ui_visibility": "read-only" if lock else "read-write"}
@@ -187,12 +188,12 @@ class Syncer:
         for location in top_locations:
             logging.info("Checking Top Location {}".format(location['name']))
 
-            present_nb_devtype = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
-            if present_nb_devtype is None:
+            present_nb_site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
+            if present_nb_site is None:
                 # Site is unique by Name
-                present_nb_devtype = next((item for item in netbox_sites if item["name"] == location['name']), None)
+                present_nb_site = next((item for item in netbox_sites if item["name"] == location['name']), None)
 
-                if present_nb_devtype is None:
+                if present_nb_site is None:
                     logging.info("Adding Site {} to netbox".format(location['name']))
                     self.netbox.dcim.sites.create(name=location['name'], slug=Syncer.slugify(location['name']),
                                                   description=self.desc, status='active',
@@ -200,21 +201,123 @@ class Syncer:
                 else:
                     if self.allow_linking:
                         logging.info("Found Site {} by name. Updating custom field instead.".format(location['name']))
-                        self.netbox.dcim.sites.update([{"id": present_nb_devtype["id"],
-                                                        "comments": self.__gen_update_comment(present_nb_devtype['comments'], "Snipe ID"),
+                        self.netbox.dcim.sites.update([{"id": present_nb_site["id"],
+                                                        "comments": self.__gen_update_comment(present_nb_site['comments'], "Snipe ID"),
                                                         "custom_fields": {KEY_CUSTOM_FIELD: location['id']}}])
                     else:
                         logging.info("Found Site {} by name. Skipping, since linking is not enabled.".format(location['name']))
 
-            elif present_nb_devtype['name'] != location['name']:
+            elif present_nb_site['name'] != location['name']:
                 if self.allow_updates:
                     logging.info("The Site {} is present, updating Item".format(location['name']))
-                    self.netbox.dcim.sites.update([{"id": present_nb_devtype["id"], "name": location['name'],
+                    self.netbox.dcim.sites.update([{"id": present_nb_site["id"], "name": location['name'],
                                                     "slug": Syncer.slugify(location['name']),
-                                                    "comments": self.__gen_update_comment(present_nb_devtype['comments'],"Values"),
+                                                    "comments": self.__gen_update_comment(present_nb_site['comments'],"Values"),
                                                     }])
                 else:
                     logging.info("The Site {} is changed. Skipping since updating is not enabled.".format(location['name']))
+
+
+    def __sync_location_toplevel(self, netbox_sites, netbox_locations, location):
+        # try to find the site, since this location is top level: just use the parent
+        site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['parent']['id']), None)
+
+        # check if we can find the location by Snipe ID
+        present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
+
+        if present_nb_loc is None:
+            # Location is unique by Name within a Site, try find it
+            present_nb_loc = next((item for item in netbox_locations if item["name"] == location['name'] and item['site']['id'] == site['id']), None)
+
+            if present_nb_loc is None:
+                logging.info("Adding Location {} to netbox".format(location['name']))
+                self.netbox.dcim.locations.create(name=location['name'], slug=Syncer.slugify(location['name']),
+                                                  description=self.desc, status='active', site=site['id'],
+                                                  custom_fields={KEY_CUSTOM_FIELD: location['id']})
+            else:
+                if self.allow_linking:
+                    logging.info("Found Location {} by name. Updating custom field instead.".format(location['name']))
+                    self.netbox.dcim.locations.update([{"id": present_nb_loc["id"],
+                                                        "custom_fields": {KEY_CUSTOM_FIELD: location['id']}}])
+                else:
+                    logging.info("Found Location {} by name. Skipping, since linking is not enabled.".format(location['name']))
+        else:
+            # is present, so check if changed and we may update
+            if present_nb_loc['name'] != location['name'] or present_nb_loc['site']['id'] != site['id']:
+                if self.allow_updates:
+                    logging.info("The Location {} is changed, updating Item".format(location['name']))
+                    self.netbox.dcim.locations.update([{"id": present_nb_loc["id"], "name": location['name'],
+                                                        "site": site['id'],
+                                                        "slug": Syncer.slugify(location['name'])
+                                                        }])
+                else:
+                    logging.info("The Location {} is changed. Skipping since updating is not enabled.".format(location['name']))
+
+
+
+
+
+
+    def sync_locations(self, locations):
+        netbox_locations = list(self.netbox.dcim.locations.all())
+        netbox_sites = list(self.netbox.dcim.sites.all())
+
+        locations_top_level = []
+        sub_locations = []
+
+        for location in locations:
+            # logging.info("Checking Location {}".format(location['name']))
+            parent = location['parent']
+            assert parent is not None
+
+            if next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == parent['id']), None) is not None:
+                locations_top_level.append(location)
+            else:
+                sub_locations.append(location)
+
+
+        print("top level:")
+        for location in locations_top_level:
+            # print("   " + location['name'])
+            self.__sync_location_toplevel(netbox_sites, netbox_locations, location)
+
+        print("sub:")
+        for location in sub_locations:
+            # print("   " + location['name'])
+            # Todo
+            pass
+
+
+            # present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
+            # if present_nb_loc is None:
+            #     # Location is unique by Name within a Site
+            #     present_nb_loc = next((item for item in netbox_locations if item["name"] == location['name']
+            #                            and item['site']['id'] == parent['id']), None)
+            #
+            #     if present_nb_loc is None:
+            #         logging.info("Adding Location {} to netbox".format(location['name']))
+            #         self.netbox.dcim.locations.create(name=location['name'], slug=Syncer.slugify(location['name']),
+            #                                           description=self.desc, status='active',
+            #                                           custom_fields={KEY_CUSTOM_FIELD: location['id']})
+            #     else:
+            #         if self.allow_linking:
+            #             logging.info("Found Location {} by name. Updating custom field instead.".format(location['name']))
+            #             self.netbox.dcim.locations.update([{"id": present_nb_loc["id"],
+            #                                                 "comments": self.__gen_update_comment(present_nb_loc['comments'], "Snipe ID"),
+            #                                                 "custom_fields": {KEY_CUSTOM_FIELD: location['id']}}])
+            #         else:
+            #             logging.info("Found Location {} by name. Skipping, since linking is not enabled.".format(location['name']))
+            #
+            # elif present_nb_loc['name'] != location['name']:
+            #     if self.allow_updates:
+            #         logging.info("The Location {} is present, updating Item".format(location['name']))
+            #         self.netbox.dcim.locations.update([{"id": present_nb_loc["id"], "name": location['name'],
+            #                                             "slug": Syncer.slugify(location['name']),
+            #                                             "comments": self.__gen_update_comment(present_nb_loc['comments'], "Values"),
+            #                                             }])
+            #     else:
+            #         logging.info("The Location {} is changed. Skipping since updating is not enabled.".format(location['name']))
+            #
 
 
 
