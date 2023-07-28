@@ -25,13 +25,19 @@ class Syncer:
 
 
     def ensure_netbox_custom_field(self):
-        if self.netbox.extras.custom_fields.get(name=KEY_CUSTOM_FIELD) is None:
+        content_types = ['dcim.device', 'dcim.devicerole', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'tenancy.tenant']
+        cufi = {"name": KEY_CUSTOM_FIELD, "display": "Snipe object id", "content_types": content_types,
+                "description": "The ID of the original SnipeIT Object used for Sync",
+                "type": "integer", "ui_visibility": "read-only"}
+
+        field = self.netbox.extras.custom_fields.get(name=KEY_CUSTOM_FIELD)
+        if field is None:
             logging.info("netbox custom field is missing -> creating one")
-            content_types = ['dcim.device', 'dcim.devicerole', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer']
-            cufi = {"name": KEY_CUSTOM_FIELD, "display": "Snipe object id", "content_types": content_types,
-                    "description": "The ID of the original SnipeIT Object used for Sync",
-                    "type": "integer"}
             self.netbox.extras.custom_fields.create(cufi)
+        else:
+            logging.info("netbox custom field is present -> updating")
+            cufi = cufi | {"id": field['id']}
+            self.netbox.extras.custom_fields.update([cufi])
 
 
 
