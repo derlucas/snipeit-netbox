@@ -21,12 +21,10 @@ class Snipe:
                                     headers=self.headers).json()
             yield next_page
 
-    def get_via_models(self):
+    def get_models_and_manufacturers_with_mac(self):
         session = requests.Session()
 
         fieldsets = self.__get_fieldsets_with_mac(session)
-        # print(fieldsets)
-        # print(session.get(endpoint + "models", params={'limit': 100, 'offset': 0}, headers=headers).json())
 
         manufacturers = []
         models = []
@@ -34,28 +32,17 @@ class Snipe:
         for page in self.__get_models(session):
             for model in page['rows']:
                 if model['fieldset'] is not None and model['fieldset']['id'] in fieldsets:
-                    # model_name = html.unescape(model['name'])
-                    # if model_name not in models:
-                    #     models.append(model_name)
+
                     if model not in models:
                         models.append(model)
 
-                    # manuf_name = html.unescape(model['manufacturer']['name'])
-                    # if manuf_name not in manufacturers:
-                    #     manufacturers.append(manuf_name)
                     if model['manufacturer'] not in manufacturers:
                         manufacturers.append(model['manufacturer'])
 
         manufacturers = sorted(manufacturers, key=lambda d: d['id'])
         models = sorted(models, key=lambda d: d['id'])
 
-        # print("manu: ")
-        # for manu in manufacturers:
-        #     print(manu)
-        #
-        # print("models: ")
-        # for model in models:
-        #     print(model)
+
         return manufacturers, models
 
     def __get_fieldsets_with_mac(self, session: requests.Session):
