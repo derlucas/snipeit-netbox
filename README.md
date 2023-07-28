@@ -35,3 +35,14 @@ To allow adding the Database ID to already present Items,
 use the Command Line Switch "--allow-linking". This will match Items by Name and
 other NetBox unique constraints to find possible Matches and set the SnipeIt
 Database ID in the NetBox Item.
+
+
+## Link,Sync,Information
+
+Deleted Items in SnipeIt will NOT be deleted from NetBox.
+
+The software will only sync Device Types (and thus Devices) with a MAC field set assigned in SnipeIt.
+
+Snipe Manufacturers are synced to NetBox Manufacturers
+Snipe Asset Models are synced to NetBox Device Types
+Snipe Companies are synced to NetBox Tenants

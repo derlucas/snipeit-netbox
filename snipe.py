@@ -70,3 +70,6 @@ class Snipe:
 
         return fieldsets_with_mac
 
+    def get_companies(self):
+        session = requests.Session()
+        return session.get(self.url + "companies", headers=self.headers).json()['rows']

@@ -22,13 +22,16 @@ if __name__ == "__main__":
     netbox = pynetbox.api(config['config']['netbox_url'], config['config']['netbox_token'])
 
     syncer = syncer.Syncer(netbox, snipe, args.allow_update, args.allow_linking)
-    syncer.ensure_netbox_custom_field()
+    # syncer.ensure_netbox_custom_field()
 
 
-    snipe_manufacturers, snipe_models = snipe.get_via_models()
-    syncer.sync_manufacturers(snipe_manufacturers)
+    # snipe_manufacturers, snipe_models = snipe.get_via_models()
+    # syncer.sync_manufacturers(snipe_manufacturers)
+    # syncer.sync_device_types(snipe_models)
 
-    syncer.sync_device_types(snipe_models)
+
+    snipe_companies = snipe.get_companies()
+    syncer.sync_companies_to_tenants(snipe_companies)
 
     # netbox_manufacturers2 = list(netbox.dcim.manufacturers.all())
     # print(netbox_manufacturers2)
