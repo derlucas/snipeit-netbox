@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pynetbox
 
 KEY_CUSTOM_FIELD = "snipe_object_id"
+DEFAULT_SITE_NAME = "Default Site"
 
 
 class Syncer:
@@ -25,8 +26,21 @@ class Syncer:
         return re.sub(r"[-\s]+", "-", value).strip("-_")
 
 
+    def __gen_update_comment(self, old_comment: str, suffix: str = None):
+        val = old_comment + '\r\n\r\n' + self.desc.replace("Imported", "Updated")
+        if suffix is not None:
+            val += " (" + suffix + ")"
+        return val
+
+    def __get_fallback_site(self):
+        fallback_site = self.netbox.dcim.sites.get(name=DEFAULT_SITE_NAME)
+        if fallback_site is None:
+            fallback_site = self.netbox.dcim.sites.create(name=DEFAULT_SITE_NAME, slug=Syncer.slugify(DEFAULT_SITE_NAME),
+                                                          description="Default Site for SnipeIT Import", status='active')
+        return fallback_site
+
     def ensure_netbox_custom_field(self, lock: bool = False):
-        content_types = ['dcim.device', 'dcim.devicerole', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'dcim.site',
+        content_types = ['dcim.device', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'dcim.site',
                          'dcim.location', 'tenancy.tenant']
         cufi = {"name": KEY_CUSTOM_FIELD, "display": "Snipe object id", "content_types": content_types,
                 "description": "The ID of the original SnipeIT Object used for Sync",
@@ -110,7 +124,6 @@ class Syncer:
                 else:
                     logging.info("The Manufacturer {} is changed. Skipping since updating is not enabled.".format(snipe_manuf['name']))
 
-
     def sync_models_to_device_types(self, snipe_models):
         netbox_device_types = list(self.netbox.dcim.device_types.all())
         netbox_manufacturers = list(self.netbox.dcim.manufacturers.all())
@@ -173,12 +186,6 @@ class Syncer:
                     else:
                         logging.info("The Device Type {} has changed. Skipping since updating is not enabled.".format(model['name']))
 
-    def __gen_update_comment(self, old_comment: str, suffix: str = None):
-        val = old_comment + '\r\n\r\n' + self.desc.replace("Imported", "Updated")
-        if suffix is not None:
-            val += " (" + suffix + ")"
-        return val
-
     def sync_top_locations_to_sites(self, locations):
         netbox_sites = list(self.netbox.dcim.sites.all())
 
@@ -216,6 +223,8 @@ class Syncer:
                                                     }])
                 else:
                     logging.info("The Site {} is changed. Skipping since updating is not enabled.".format(location['name']))
+
+
 
     def __sync_location(self, netbox_sites, netbox_locations, locations_with_parents, location):
         logging.info("Checking Location {}".format(location['name']))
@@ -313,26 +322,68 @@ class Syncer:
         self.__sync_location_relationships(snipe_sub_locations)
 
     @staticmethod
-    def __get_from_dict_list(the_list: list, needle: int):
+    def __get_customfield_from_dict_list(the_list: list, needle: int):
         return next((item for item in the_list if item["custom_fields"][KEY_CUSTOM_FIELD] == needle), None)
+
+
+    def __get_role_from_category(self, netbox_roles, snipe_asset):
+        category = snipe_asset['category']
+        # ToDo: take the category name, if contains a hyphen, only take first part upto the
+        #  hypen (trim). Then search for that name, if not found -> create a new role
+
+        role = ""
+        if role is None:
+
+            role = self.netbox.dcim.device_roles.create(name=category['name'])
+            netbox_roles.append(role)
+
+        return netbox_roles, role
 
 
     def sync_assets_to_devices(self, snipe_assets):
         netbox_devices = list(self.netbox.dcim.devices.all())
         netbox_tenants = list(self.netbox.tenancy.tenants.all())
+        netbox_locations = list(self.netbox.dcim.locations.all())
+        netbox_sites = list(self.netbox.dcim.sites.all())
+        netbox_roles = list(self.netbox.dcim.device_roles.all())
+
+
+        fallback_site = None
 
         for snipe_asset in snipe_assets:
             logging.info("Checking Asset: {} Tag: {}".format(snipe_asset['name'], snipe_asset['asset_tag']))
 
-            # if Asset is Checked out to a Location, take that Locations Top Parent as Site
-            # or else if Asset has a default Location, take that Locations Top Parent as Site
-            # or create a default Import Site
-            site = None # ToDo
-            nb_tenant = Syncer.__get_from_dict_list(netbox_tenants, snipe_asset['company']['id'])
+            location = None
+            # Location:
+            # if checked out to a Location:
+            #       the property "location" contains e.g. "{'id': 76, 'name': '530 Verwaltung/Oper'}"
+            #       the property "assigned_to" contains e.g. "{'id': 76, 'name': '530 Verwaltung/Oper', 'type': 'location'}"
+            # if the found location is a site, do not use it
+            if snipe_asset['location'] is not None:
+                location = Syncer.__get_customfield_from_dict_list(netbox_locations, snipe_asset['location']['id'])
+            elif snipe_asset['rtd_location'] is not None:
+                location = Syncer.__get_customfield_from_dict_list(netbox_locations, snipe_asset['rtd_location']['id'])
+
+            if location is None:
+                logging.warning("Could not get a valid location for {}".format(snipe_asset['name']))
+
+
+            if location is not None:
+                site = location['site']
+            else:
+                if fallback_site is None:
+                    fallback_site = self.__get_fallback_site()
+                site = fallback_site
+
+            logging.info("Location = {}, site = {}".format(location, site['name']))
+
+            nb_tenant = Syncer.__get_customfield_from_dict_list(netbox_tenants, snipe_asset['company']['id'])
+            netbox_roles, role = self.__get_role_from_category(netbox_roles, snipe_asset)
 
             present_nb_device = next((item for item in netbox_devices if item["custom_fields"][KEY_CUSTOM_FIELD] == snipe_asset['id']), None)
             if present_nb_device is None:
                 # Try finding device by Name and Tenant, Netbox has a unique constraint to that two fields
+
                 # a Problem here: Snipe does allow Multiple Assets with the same Name
                 if present_nb_device is None:
                     logging.info("Adding Device to netbox")
@@ -344,10 +395,9 @@ class Syncer:
                                                     status='active',
                                                     site=site['id'],
                                                     tenant=nb_tenant['id'],
-                                                    custom_fields={KEY_CUSTOM_FIELD: snipe_asset['id']})
+                                                    custom_fields={KEY_CUSTOM_FIELD: snipe_asset['id']})  # ToDo: fill the missing information
 
 
-                pass
             else:
                 # Device exists, go the update route
                 pass
@@ -356,7 +406,7 @@ class Syncer:
 
 
 
-        pass
+
 
 
 

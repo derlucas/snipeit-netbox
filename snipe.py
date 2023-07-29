@@ -57,9 +57,6 @@ class Snipe:
                     if asset not in assets:
                         assets.append(asset)
 
-                        return assets
-
-
         assets = sorted(assets, key=lambda d: d['asset_tag'])
         return assets
 
