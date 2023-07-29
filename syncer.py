@@ -43,6 +43,7 @@ class Syncer:
 
     def sync_companies_to_tenants(self, snipe_companies):
         netbox_tenants = list(self.netbox.tenancy.tenants.all())
+        # ToDo: remove local desc
         desc = "Imported from SnipeIT {}".format(datetime.now(timezone.utc).strftime("%y-%m-%d %H:%M:%S (UTC)"))
 
         for snipe_company in snipe_companies:
@@ -121,7 +122,7 @@ class Syncer:
             manuf_by_model = next((item for item in netbox_manufacturers if item["name"] == model['manufacturer']['name']), None)
 
             # search the Device Type by Custom Field ID-Value
-            present_nb_devtype = next((item for item in netbox_device_types if item['custom_fields'][KEY_CUSTOM_FIELD] == model['id']), None)
+            present_nb_devtype = next((item for item in netbox_device_types if item['custom_fields'][KEY_CUSTOM_FIELD] == model['id']), None)   # ToDo: use function
 
             if present_nb_devtype is None:  # No associated Device Type found
 
@@ -187,10 +188,10 @@ class Syncer:
         for location in top_locations:
             logging.info("Checking Top Location as Site: {}".format(location['name']))
 
-            present_nb_site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
+            present_nb_site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)   # ToDo: use function
             if present_nb_site is None:
                 # Site is unique by Name
-                present_nb_site = next((item for item in netbox_sites if item["name"] == location['name']), None)
+                present_nb_site = next((item for item in netbox_sites if item["name"] == location['name']), None)   # ToDo: use function
 
                 if present_nb_site is None:
                     logging.info("Adding Site {} to netbox".format(location['name']))
@@ -226,12 +227,12 @@ class Syncer:
         while site is None:
             if parent is not None:
                 logging.debug("parent: {}".format(parent['name']))
-                site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == parent['id']), None)
+                site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == parent['id']), None)   # ToDo: use function
             else:
                 logging.error("can not find the Site for Location {}".format(location['name']))
                 return
 
-            parent_item = next((item for item in locations_with_parents if item['id'] == parent['id']), None)
+            parent_item = next((item for item in locations_with_parents if item['id'] == parent['id']), None)   # ToDo: use function
             if parent_item is not None:
                 parent = parent_item['parent']
             else:
@@ -241,11 +242,11 @@ class Syncer:
         logging.debug("Site for Location {} will be {}".format(location['name'], site['name']))
 
         # check if we can find the location by Snipe ID
-        present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)
+        present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)   # ToDo: use function
 
         if present_nb_loc is None:
             # not found by ID, so Location is unique by Name within a Site, try find it
-            present_nb_loc = next((item for item in netbox_locations if item["name"] == location['name'] and item['site']['id'] == site['id']), None)
+            present_nb_loc = next((item for item in netbox_locations if item["name"] == location['name'] and item['site']['id'] == site['id']), None)   # ToDo: use function
 
             if present_nb_loc is None:
                 logging.info("Adding Location {} to netbox".format(location['name']))
@@ -277,9 +278,9 @@ class Syncer:
         updates = []
 
         for snipe_location in sub_locations:
-            present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['id']), None)
+            present_nb_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['id']), None)  # ToDo: use function
             assert present_nb_loc is not None
-            present_nb_parent_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['parent']['id']), None)
+            present_nb_parent_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['parent']['id']), None)  # ToDo: use function
             assert present_nb_parent_loc is not None
 
             if present_nb_loc['parent']['id'] != present_nb_parent_loc['id']:
@@ -302,7 +303,7 @@ class Syncer:
 
         for snipe_location in snipe_locations_with_parent:
             # check if the locations's parent is a NetBox Site, then it is considered a top level Location
-            if next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['parent']['id']), None) is None:
+            if next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['parent']['id']), None) is None:    # ToDo: use function
                 snipe_sub_locations.append(snipe_location)
 
 
@@ -311,7 +312,48 @@ class Syncer:
 
         self.__sync_location_relationships(snipe_sub_locations)
 
+    @staticmethod
+    def __get_from_dict_list(the_list: list, needle: int):
+        return next((item for item in the_list if item["custom_fields"][KEY_CUSTOM_FIELD] == needle), None)
+
+
     def sync_assets_to_devices(self, snipe_assets):
+        netbox_devices = list(self.netbox.dcim.devices.all())
+        netbox_tenants = list(self.netbox.tenancy.tenants.all())
+
+        for snipe_asset in snipe_assets:
+            logging.info("Checking Asset: {} Tag: {}".format(snipe_asset['name'], snipe_asset['asset_tag']))
+
+            # if Asset is Checked out to a Location, take that Locations Top Parent as Site
+            # or else if Asset has a default Location, take that Locations Top Parent as Site
+            # or create a default Import Site
+            site = None # ToDo
+            nb_tenant = Syncer.__get_from_dict_list(netbox_tenants, snipe_asset['company']['id'])
+
+            present_nb_device = next((item for item in netbox_devices if item["custom_fields"][KEY_CUSTOM_FIELD] == snipe_asset['id']), None)
+            if present_nb_device is None:
+                # Try finding device by Name and Tenant, Netbox has a unique constraint to that two fields
+                # a Problem here: Snipe does allow Multiple Assets with the same Name
+                if present_nb_device is None:
+                    logging.info("Adding Device to netbox")
+                    self.netbox.dcim.devices.create(name=snipe_asset['name'],
+                                                    comments="Notes from SnipeIT when initially creating this Netbox Entry. "
+                                                             "(It will not be Updated on further syncs):\n\n " +
+                                                             str(snipe_asset['notes']).replace('\r\n', '\r\n\r\n'),
+                                                    description=self.desc,
+                                                    status='active',
+                                                    site=site['id'],
+                                                    tenant=nb_tenant['id'],
+                                                    custom_fields={KEY_CUSTOM_FIELD: snipe_asset['id']})
+
+
+                pass
+            else:
+                # Device exists, go the update route
+                pass
+
+
+
 
 
         pass
