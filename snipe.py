@@ -45,7 +45,6 @@ class Snipe:
 
     def get_assets_with_mac(self):
         session = requests.Session()
-        fieldsets = self.__get_fieldsets_with_mac(session)
 
         # i don't know an easy way to fetch only assets with mac fieldsets, so we have to get everything and filter locally
 
@@ -57,7 +56,7 @@ class Snipe:
                     if asset not in assets:
                         assets.append(asset)
 
-        assets = sorted(assets, key=lambda d: d['asset_tag'])
+        #assets = sorted(assets, key=lambda d: d['asset_tag'])
         return assets
 
 
