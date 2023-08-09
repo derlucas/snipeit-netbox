@@ -32,11 +32,31 @@ class Syncer:
             val += " (" + suffix + ")"
         return val
 
-    def __get_fallback_site(self):
-        fallback_site = self.netbox.dcim.sites.get(name=DEFAULT_SITE_NAME)
+    def __get_fallback_site(self, company_name=None):
+
+        if company_name is not None:
+            # try a hard mapping
+            # ToDo: this is not very elegant and should be configurable
+            company_name = company_name.lower()
+            if "akademie" in company_name:
+                fallback_site = self.netbox.dcim.sites.get(name="547 Akademie")
+            elif "oper" in company_name or "medienabt" in company_name:
+                fallback_site = self.netbox.dcim.sites.get(name="530 Verwaltung/Oper")
+            elif "schauspi" in company_name:
+                fallback_site = self.netbox.dcim.sites.get(name="529 Schauspielhaus")
+            elif "ballett" in company_name:
+                fallback_site = self.netbox.dcim.sites.get(name="551 Ballettzentrum")
+            else:
+                fallback_site = self.netbox.dcim.sites.get(name=DEFAULT_SITE_NAME)
+
+        else:
+            fallback_site = self.netbox.dcim.sites.get(name=DEFAULT_SITE_NAME)
+
+
         if fallback_site is None:
             fallback_site = self.netbox.dcim.sites.create(name=DEFAULT_SITE_NAME, slug=Syncer.slugify(DEFAULT_SITE_NAME),
                                                           description="Default Site for SnipeIT Import", status='active')
+
         return fallback_site
 
     def ensure_netbox_custom_field(self, lock: bool = False):
@@ -383,9 +403,7 @@ class Syncer:
             if location is not None:
                 site = location['site']
             else:
-                if fallback_site is None:
-                    fallback_site = self.__get_fallback_site()
-                site = fallback_site
+                site = self.__get_fallback_site(snipe_asset['company']['name'])
 
 
             nb_tenant = None
@@ -398,7 +416,10 @@ class Syncer:
 
 
     def __update_device(self, nb_device, snipe_device, nb_role, nb_site, nb_tenant, nb_device_type, update_custom_field_id: bool = False):
-
+        """
+        This function updates a netbox device. It will check for changed properties and only write to netbox if something has changed
+        :param update_custom_field_id: This sets when the linking ID should be updated
+        """
         update_dict = {'id': nb_device['id']}
 
         if update_custom_field_id:
@@ -422,19 +443,28 @@ class Syncer:
         if nb_device['device_type']['id'] != nb_device_type['id']:
             update_dict = update_dict | {'device_type': nb_device_type['id']}
 
-        # ToDo: this needs fixing, now we imported all Devices with Tag in the Name. Otherwise looks good
-        # check if we altered the netbox name to avoid conflict
-        if nb_device['name'] is not None and snipe_device['asset_tag'] in nb_device['name']:
-            check_name = "{} {}".format(snipe_device['name'], snipe_device['asset_tag'])
-        else:
-            check_name = snipe_device['name'] if len(snipe_device['name']) > 0 else None
 
-        if nb_device['name'] != check_name:
-            # check for possible name conflict
-            if len(snipe_device['name']) > 0 and self.netbox.dcim.devices.get(name=check_name, site_id=nb_site['id'], tenant_id=nb_tenant['id']):
-                name = "{} {}".format(snipe_device['name'], snipe_device['asset_tag'])
+        # check if we altered the netbox name to avoid conflict
+        oldname = nb_device['name']
+
+        if oldname is not None and oldname.rfind(snipe_device['asset_tag']) > 1:
+            # strip the tag
+            oldname = oldname[0:oldname.rfind(snipe_device['asset_tag'])-1]
+
+
+        # snipe's empty name can be an empty string rather then None
+        check_name = snipe_device['name'] if len(snipe_device['name']) > 0 else None
+
+        if oldname != check_name:
+            if check_name is None:
+                # no check needed, Netbox allows multiple Devices without Name
+                name = None
             else:
-                name = snipe_device['name'] if len(snipe_device['name']) > 0 else None
+                # check for possible name conflict
+                if self.netbox.dcim.devices.get(name=check_name, site_id=nb_site['id'], tenant_id=nb_tenant['id']):
+                    name = "{} {}".format(check_name, snipe_device['asset_tag'])
+                else:
+                    name = snipe_device['name']
 
             update_dict = update_dict | {'name': name}
 
@@ -482,6 +512,7 @@ class Syncer:
                                                  site=nb_site['id'],
                                                  asset_tag=snipe_asset['asset_tag'],
                                                  device_role=nb_role['id'],
+                                                 serial=snipe_asset['serial'],
                                                  device_type=nb_device_type['id'],
                                                  tenant=nb_tenant['id'] if nb_tenant is not None else None,
                                                  custom_fields={KEY_CUSTOM_FIELD: snipe_asset['id']})
