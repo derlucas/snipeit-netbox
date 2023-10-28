@@ -1,7 +1,7 @@
 import logging
 import math
 import requests
-
+from w3lib.html import replace_entities
 
 class Snipe:
     def __init__(self, url: str, token: str):
@@ -54,11 +54,12 @@ class Snipe:
             for asset in page['rows']:
                 if Snipe.__custom_fields_has_mac_type(asset['custom_fields']):
                     if asset not in assets:
+                        for att in ['name', 'notes']:
+                            if asset[att]: asset[att] = replace_entities(asset[att])
                         assets.append(asset)
 
         #assets = sorted(assets, key=lambda d: d['asset_tag'])
         return assets
-
 
     def get_models_and_manufacturers_with_mac(self):
         session = requests.Session()
@@ -73,6 +74,8 @@ class Snipe:
                 if model['fieldset'] is not None and model['fieldset']['id'] in fieldsets:
 
                     if model not in models:
+                        for att in ['name', 'notes']:
+                            if model[att]: model[att] = replace_entities(model[att])
                         models.append(model)
 
                     if model['manufacturer'] not in manufacturers:
