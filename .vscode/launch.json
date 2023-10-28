@@ -12,7 +12,7 @@
             "program": "main.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": [ "--allow-update", "--allow-linking"]
+            "args": [ "--allow-update", "--allow-linking", "--update-unique-existing"]
         }
     ]
 }

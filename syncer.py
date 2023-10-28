@@ -172,7 +172,7 @@ class Syncer:
                                                          manufacturer=manuf_by_model.id,
                                                          custom_fields={KEY_CUSTOM_FIELD: model['id']},
                                                          comments="Notes from SnipeIT when initially creating this Netbox Entry. "
-                                                                  "(It will not be Updated on further syncs):\n\n " +
+                                                                  "\n " +
                                                                   str(model['notes']).replace('\r\n', '\r\n\r\n'),
                                                          is_full_depth=False, u_height=0.0)
                 else:
@@ -374,7 +374,7 @@ class Syncer:
         return netbox_roles, role
 
 
-    def sync_assets_to_devices(self, snipe_assets):
+    def sync_assets_to_devices(self, snipe_assets, update_unique_existing, no_append_assettag):
         netbox_devices = list(self.netbox.dcim.devices.all())
         netbox_tenants = list(self.netbox.tenancy.tenants.all())
         netbox_sites = list(self.netbox.dcim.sites.all())
@@ -387,8 +387,15 @@ class Syncer:
 
         for snipe_asset in snipe_assets:
             logging.info("Checking Asset: {} Tag: {}".format(snipe_asset['name'], snipe_asset['asset_tag']))
-            if snipe_asset['name'] == "QPX-R4N1":
-                logging.info("debug me")
+            if snipe_asset['name'] == "xxxxxxxxxxxxxx":
+                logging.info("debug me - set breakpoint here")
+
+            if update_unique_existing:
+                # check if the name is unique in snipeit
+                otherAsset = next((item for item in snipe_assets if (item["name"] and item["name"].lower().strip() == snipe_asset['name'].lower().strip() and item['id'] != snipe_asset['id'])), None)
+                unique = (not otherAsset)
+            else:
+                unique = False
 
             nb_device_type = Syncer.__get_customfield_from_dict_list(netbox_device_types, snipe_asset['model']['id'])
 
@@ -431,7 +438,7 @@ class Syncer:
             netbox_roles, role = self.__get_role_from_category(netbox_roles, snipe_asset)
 
             try:
-                self.__sync_device(nb_device_type, nb_tenant, netbox_devices, role, site, snipe_asset)
+                self.__sync_device(nb_device_type, nb_tenant, netbox_devices, role, site, snipe_asset, update_unique_existing, unique, no_append_assettag)
             except Exception as e:
                 logging.error("---------------------------------------------------------")
                 logging.error("Error importing/updating Asset: {} Tag: {}".format(snipe_asset['name'], snipe_asset['asset_tag']))
@@ -499,7 +506,7 @@ class Syncer:
 
 
 
-    def __sync_device(self, nb_device_type, nb_tenant, netbox_devices, nb_role, nb_site, snipe_asset):
+    def __sync_device(self, nb_device_type, nb_tenant, netbox_devices, nb_role, nb_site, snipe_asset, update_unique_existing, unique, no_append_assettag):
 
         # try finding by SnipeID, this will be a hard unique association:
         device = next((item for item in netbox_devices if item["custom_fields"][KEY_CUSTOM_FIELD] == snipe_asset['id']), None)
@@ -510,31 +517,35 @@ class Syncer:
             return
 
         # try finding by Asset Tag, the Tag is a required field in Snipe and Optional in Netbox
-        device = next((item for item in netbox_devices if item["asset_tag"] and item["asset_tag"].lower().strip() == snipe_asset['asset_tag'].lower().strip()), None)
+        device = next((item for item in netbox_devices if item["asset_tag"] and item["asset_tag"] == snipe_asset['asset_tag']), None)
         if device is not None:
             # check if updating is allowed, then check changed fields and update
             self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, True)
             return
 
 
-        # Try finding device by Name and Tenant, Netbox has a unique constraint to that two fields
-        device = next((item for item in netbox_devices if (item["name"] and item["name"].lower().strip() == snipe_asset['name'].lower().strip() and item['tenant'] is not None and item['tenant']['id'] == nb_tenant['id'])), None)
-        # If a device with the same Name and Tenant is found update it
-        if device is not None:
-            # check if updating is allowed, then check changed fields and update
-            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, True)
-            return
-        
-        # if no device is found with same name and same tenant we add the Asset Tag to the Name and create a new Device
+        if unique and update_unique_existing:
+            # Try finding device by Name and Tenant, Netbox has a unique constraint to that two fields
+            device = next((item for item in netbox_devices if (item["name"] and item["name"].lower().strip() == snipe_asset['name'].lower().strip() and item['tenant'] is not None and item['tenant']['id'] == nb_tenant['id'])), None)
+            # If a device with the same Name and Tenant is found update it
+            if device is not None:
+                # check if updating is allowed, then check changed fields and update
+                self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, True)
+                return
+                
+        # if no device is found with same uniqe name and same tenant we add the Asset Tag to the Name and create a new Device
         if snipe_asset['name']:
-            name = "{} {}".format(snipe_asset['name'], snipe_asset['asset_tag'])
+            if unique and (update_unique_existing or no_append_assettag):
+                name = snipe_asset['name']
+            else:
+                name = "{} {}".format(snipe_asset['name'], snipe_asset['asset_tag'])
         else:
             name = snipe_asset['asset_tag']
 
-        logging.info("Adding Device to netbox")
+        logging.info("Adding Device to netbox, name {}".format(name))
         device = self.netbox.dcim.devices.create(name=name,
                                                  comments="Notes from SnipeIT when initially creating this Netbox Entry. "
-                                                          "(It will not be Updated on further syncs):\n\n " +
+                                                          "\n " +
                                                           str(snipe_asset['notes']).replace('\r\n', '\r\n\r\n'),
                                                  description=self.desc,
                                                  status='active',

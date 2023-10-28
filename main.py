@@ -11,6 +11,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--allow-update', action='store_true')
     parser.add_argument('--allow-linking', action='store_true')
+    parser.add_argument('--update-unique-existing', action='store_true')
+    parser.add_argument('--no-append-assettag', action='store_true')
     args = parser.parse_args()
 
     config = configparser.ConfigParser()
@@ -38,10 +40,10 @@ if __name__ == "__main__":
     locations = snipe.get_locations()
     syncer.sync_top_locations_to_sites(locations)
     syncer.sync_locations(locations)
-
+    
     logging.info("Syncing Assets with MACs")
     assets = snipe.get_assets_with_mac()
-    syncer.sync_assets_to_devices(assets)
+    syncer.sync_assets_to_devices(assets, args.update_unique_existing, args.no_append_assettag)
     # for asset in assets:
     #     print("{} {}".format(asset['asset_tag'], asset['name']))
 
