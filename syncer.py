@@ -390,7 +390,7 @@ class Syncer:
             if snipe_asset['name'] == "xxxxxxxxxxxxxx":
                 logging.info("debug me - set breakpoint here")
 
-            if update_unique_existing:
+            if update_unique_existing or no_append_assettag:
                 # check if the name is unique in snipeit
                 otherAsset = next((item for item in snipe_assets if (item["name"] and item["name"].lower().strip() == snipe_asset['name'].lower().strip() and item['id'] != snipe_asset['id'])), None)
                 unique = (not otherAsset)
@@ -402,8 +402,6 @@ class Syncer:
             if not nb_device_type:
                 logging.warn("No device type! skipping")
                 continue
-            
-            logging.info("Type is : {} ".format(nb_device_type))
 
             location = None
             # Location:
@@ -445,7 +443,7 @@ class Syncer:
                 logging.error(e)
 
 
-    def __update_device(self, nb_device, snipe_device, nb_role, nb_site, nb_tenant, nb_device_type, update_custom_field_id: bool = False):
+    def __update_device(self, nb_device, snipe_device, nb_role, nb_site, nb_tenant, nb_device_type, nb_status, update_custom_field_id: bool = False):
         """
         This function updates a netbox device. It will check for changed properties and only write to netbox if something has changed
         :param update_custom_field_id: This sets when the linking ID should be updated
@@ -473,6 +471,8 @@ class Syncer:
         if nb_device['device_type']['id'] != nb_device_type['id']:
             update_dict = update_dict | {'device_type': nb_device_type['id']}
 
+        if nb_device['status']['value'] != nb_status:
+            update_dict = update_dict | {'status': nb_status}
 
         # check if we altered the netbox name to avoid conflict
         oldname = nb_device['name']
@@ -511,16 +511,28 @@ class Syncer:
         # try finding by SnipeID, this will be a hard unique association:
         device = next((item for item in netbox_devices if item["custom_fields"][KEY_CUSTOM_FIELD] == snipe_asset['id']), None)
 
+        nb_status = 'active'
+        if snipe_asset['status_label']['status_meta'] in ['undeployable', 'pending']: # deployed, deployable
+            nb_status = 'offline'
+            if snipe_asset['assigned_to'] == None:
+                if not device:
+                    # no not create undeployable and not deployed device
+                    return
+                #else
+                    # fixme: change location to none?
+        elif snipe_asset['status_label']['status_meta'] in ['deployable']:
+            nb_status = 'inventory'
+
         if device is not None:
             # check if updating is allowed, then check changed fields and update
-            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, False)
+            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type,  nb_status, False)
             return
 
         # try finding by Asset Tag, the Tag is a required field in Snipe and Optional in Netbox
         device = next((item for item in netbox_devices if item["asset_tag"] and item["asset_tag"] == snipe_asset['asset_tag']), None)
         if device is not None:
             # check if updating is allowed, then check changed fields and update
-            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, True)
+            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, nb_status, True)
             return
 
 
@@ -530,7 +542,7 @@ class Syncer:
             # If a device with the same Name and Tenant is found update it
             if device is not None:
                 # check if updating is allowed, then check changed fields and update
-                self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, True)
+                self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, nb_status, True)
                 return
                 
         # if no device is found with same uniqe name and same tenant we add the Asset Tag to the Name and create a new Device
@@ -548,7 +560,7 @@ class Syncer:
                                                           "\n " +
                                                           str(snipe_asset['notes']).replace('\r\n', '\r\n\r\n'),
                                                  description=self.desc,
-                                                 status='active',
+                                                 status=nb_status,
                                                  site=nb_site['id'] if nb_site else 1,
                                                  asset_tag=snipe_asset['asset_tag'],
                                                  role=nb_role['id'],
