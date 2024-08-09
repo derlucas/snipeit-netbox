@@ -86,7 +86,7 @@ class Syncer:
             present_nb_tenant = next((item for item in netbox_tenants if item["custom_fields"][KEY_CUSTOM_FIELD] == snipe_company['id']), None)
             if present_nb_tenant is None:
                 # Tenant is unique by Name
-                present_nb_tenant = next((item for item in netbox_tenants if item["name"] == snipe_company['name']), None)
+                present_nb_tenant = next((item for item in netbox_tenants if item["name"].lower().strip() == snipe_company['name'].lower().strip()), None)
                 if present_nb_tenant is None:
                     logging.info("Adding Tenant {} to netbox.".format(snipe_company['name']))
                     self.netbox.tenancy.tenants.create(name=snipe_company['name'],
@@ -121,7 +121,7 @@ class Syncer:
             present_nb_manuf = next((item for item in netbox_manufacturers if item["custom_fields"][KEY_CUSTOM_FIELD] == snipe_manuf['id']), None)
             if present_nb_manuf is None:
                 # Manufacturer is unique by Name
-                present_nb_manuf = next((item for item in netbox_manufacturers if item["name"] == snipe_manuf['name']), None)
+                present_nb_manuf = next((item for item in netbox_manufacturers if item["name"].lower().strip() == snipe_manuf['name'].lower().strip()), None)
 
                 if present_nb_manuf is None:
                     logging.info("Adding Manufacturer {} to netbox".format(snipe_manuf['name']))
@@ -160,8 +160,8 @@ class Syncer:
             if present_nb_devtype is None:  # No associated Device Type found
 
                 # Search by Model+Manufacturer
-                present_nb_devtype = next((item for item in netbox_device_types if item['model'] == model['name'] and
-                                           item['manufacturer']['name'] == model['manufacturer']['name']), None)
+                present_nb_devtype = next((item for item in netbox_device_types if item['model'].lower().strip() == model['name'].lower().strip() and
+                                           item['manufacturer']['name'].lower().strip() == model['manufacturer']['name'].lower().strip()), None)
 
                 if present_nb_devtype is None:
                     logging.info("Adding Device Type {} to netbox".format(model['name']))
@@ -172,7 +172,7 @@ class Syncer:
                                                          manufacturer=manuf_by_model.id,
                                                          custom_fields={KEY_CUSTOM_FIELD: model['id']},
                                                          comments="Notes from SnipeIT when initially creating this Netbox Entry. "
-                                                                  "(It will not be Updated on further syncs):\n\n " +
+                                                                  "\n " +
                                                                   str(model['notes']).replace('\r\n', '\r\n\r\n'),
                                                          is_full_depth=False, u_height=0.0)
                 else:
@@ -218,7 +218,7 @@ class Syncer:
             present_nb_site = next((item for item in netbox_sites if item['custom_fields'][KEY_CUSTOM_FIELD] == location['id']), None)   # ToDo: use function
             if present_nb_site is None:
                 # Site is unique by Name
-                present_nb_site = next((item for item in netbox_sites if item["name"] == location['name']), None)   # ToDo: use function
+                present_nb_site = next((item for item in netbox_sites if item["name"].lower().strip() == location['name'].lower().strip()), None)   # ToDo: use function
 
                 if present_nb_site is None:
                     logging.info("Adding Site {} to netbox".format(location['name']))
@@ -275,7 +275,7 @@ class Syncer:
 
         if present_nb_loc is None:
             # not found by ID, so Location is unique by Name within a Site, try find it
-            present_nb_loc = next((item for item in netbox_locations if item["name"] == location['name'] and item['site']['id'] == site['id']), None)   # ToDo: use function
+            present_nb_loc = next((item for item in netbox_locations if item["name"].lower().strip() == location['name'].lower().strip() and item['site']['id'] == site['id']), None)   # ToDo: use function
 
             if present_nb_loc is None:
                 logging.info("Adding Location {} to netbox".format(location['name']))
@@ -312,7 +312,7 @@ class Syncer:
             present_nb_parent_loc = next((item for item in netbox_locations if item['custom_fields'][KEY_CUSTOM_FIELD] == snipe_location['parent']['id']), None)  # ToDo: use function
             assert present_nb_parent_loc is not None
 
-            if present_nb_loc['parent']['id'] != present_nb_parent_loc['id']:
+            if present_nb_loc and present_nb_loc['parent'] and present_nb_parent_loc and present_nb_loc['parent']['id'] != present_nb_parent_loc['id']:
                 if self.allow_updates:
                     logging.info("The Location {} has changed, updating Item".format(present_nb_loc['name']))
                     updates.append({"id": present_nb_loc["id"], "parent": present_nb_parent_loc['id']})
@@ -374,9 +374,10 @@ class Syncer:
         return netbox_roles, role
 
 
-    def sync_assets_to_devices(self, snipe_assets):
+    def sync_assets_to_devices(self, snipe_assets, update_unique_existing, no_append_assettag):
         netbox_devices = list(self.netbox.dcim.devices.all())
         netbox_tenants = list(self.netbox.tenancy.tenants.all())
+        netbox_sites = list(self.netbox.dcim.sites.all())
         netbox_locations = list(self.netbox.dcim.locations.all())
         netbox_roles = list(self.netbox.dcim.device_roles.all())
         netbox_device_types = list(self.netbox.dcim.device_types.all())
@@ -386,25 +387,47 @@ class Syncer:
 
         for snipe_asset in snipe_assets:
             logging.info("Checking Asset: {} Tag: {}".format(snipe_asset['name'], snipe_asset['asset_tag']))
+            if snipe_asset['name'] == "xxxxxxxxxxxxxx":
+                logging.info("debug me - set breakpoint here")
+
+            if update_unique_existing or no_append_assettag:
+                # check if the name is unique in snipeit
+                otherAsset = next((item for item in snipe_assets if (item["name"] and item["name"].lower().strip() == snipe_asset['name'].lower().strip() and item['id'] != snipe_asset['id'])), None)
+                unique = (not otherAsset)
+            else:
+                unique = False
 
             nb_device_type = Syncer.__get_customfield_from_dict_list(netbox_device_types, snipe_asset['model']['id'])
+
+            if not nb_device_type:
+                logging.warn("No device type! skipping")
+                continue
 
             location = None
             # Location:
             # if checked out to a Location:
             #       the property "location" contains e.g. "{'id': 76, 'name': '530 Verwaltung/Oper'}"
             #       the property "assigned_to" contains e.g. "{'id': 76, 'name': '530 Verwaltung/Oper', 'type': 'location'}"
-            # if the found location is a site, do not use it
-            if snipe_asset['location'] is not None:
-                location = Syncer.__get_customfield_from_dict_list(netbox_locations, snipe_asset['location']['id'])
-            elif snipe_asset['rtd_location'] is not None:
-                location = Syncer.__get_customfield_from_dict_list(netbox_locations, snipe_asset['rtd_location']['id'])
+            # if the found location is a site, set site, but not location (this ensures that already existing devices with location can be updated)
+
+            if snipe_asset['location']:
+                locationId = snipe_asset['location']['id']
+            elif snipe_asset['rtd_location']:
+                locationId = snipe_asset['rtd_location']['id']
+            else:
+                locationId = None
+
+            if locationId:
+                location = Syncer.__get_customfield_from_dict_list(netbox_locations, locationId)
 
             if location is not None:
                 site = location['site']
-            else:
+            elif locationId:
+                site = Syncer.__get_customfield_from_dict_list(netbox_sites, locationId)
+            elif snipe_asset['company'] is not None:
                 site = self.__get_fallback_site(snipe_asset['company']['name'])
-
+            else:
+                site = None
 
             nb_tenant = None
             if snipe_asset['company'] is not None:
@@ -412,10 +435,15 @@ class Syncer:
 
             netbox_roles, role = self.__get_role_from_category(netbox_roles, snipe_asset)
 
-            self.__sync_device(nb_device_type, nb_tenant, netbox_devices, role, site, snipe_asset)
+            try:
+                self.__sync_device(nb_device_type, nb_tenant, netbox_devices, role, site, snipe_asset, update_unique_existing, unique, no_append_assettag)
+            except Exception as e:
+                logging.error("---------------------------------------------------------")
+                logging.error("Error importing/updating Asset: {} Tag: {}".format(snipe_asset['name'], snipe_asset['asset_tag']))
+                logging.error(e)
 
 
-    def __update_device(self, nb_device, snipe_device, nb_role, nb_site, nb_tenant, nb_device_type, update_custom_field_id: bool = False):
+    def __update_device(self, nb_device, snipe_device, nb_role, nb_site, nb_tenant, nb_device_type, nb_status, update_custom_field_id: bool = False):
         """
         This function updates a netbox device. It will check for changed properties and only write to netbox if something has changed
         :param update_custom_field_id: This sets when the linking ID should be updated
@@ -431,18 +459,20 @@ class Syncer:
         if nb_device['serial'] != snipe_device['serial']:
             update_dict = update_dict | {'serial': snipe_device['serial']}
 
-        if nb_device['site']['id'] != nb_site['id']:
+        if nb_site and nb_device['site']['id'] != nb_site['id']:
             update_dict = update_dict | {'site': nb_site['id']}
 
         if nb_device['device_role']['id'] != nb_role['id']:
             update_dict = update_dict | {'device_role': nb_role['id']}
 
-        if nb_device['tenant']['id'] != nb_tenant['id']:
+        if nb_tenant and nb_device['tenant'] and nb_device['tenant']['id'] != nb_tenant['id']:
             update_dict = update_dict | {'tenant': nb_tenant['id']}
 
         if nb_device['device_type']['id'] != nb_device_type['id']:
             update_dict = update_dict | {'device_type': nb_device_type['id']}
 
+        if nb_device['status']['value'] != nb_status:
+            update_dict = update_dict | {'status': nb_status}
 
         # check if we altered the netbox name to avoid conflict
         oldname = nb_device['name']
@@ -476,42 +506,64 @@ class Syncer:
 
 
 
-    def __sync_device(self, nb_device_type, nb_tenant, netbox_devices, nb_role, nb_site, snipe_asset):
+    def __sync_device(self, nb_device_type, nb_tenant, netbox_devices, nb_role, nb_site, snipe_asset, update_unique_existing, unique, no_append_assettag):
 
         # try finding by SnipeID, this will be a hard unique association:
         device = next((item for item in netbox_devices if item["custom_fields"][KEY_CUSTOM_FIELD] == snipe_asset['id']), None)
 
+        nb_status = 'active'
+        if snipe_asset['status_label']['status_meta'] in ['undeployable', 'pending']: # deployed, deployable
+            nb_status = 'offline'
+            if snipe_asset['assigned_to'] == None:
+                if not device:
+                    # no not create undeployable and not deployed device
+                    return
+                #else
+                    # fixme: change location to none?
+        elif snipe_asset['status_label']['status_meta'] in ['deployable']:
+            nb_status = 'inventory'
+
         if device is not None:
             # check if updating is allowed, then check changed fields and update
-            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, False)
+            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type,  nb_status, False)
             return
 
         # try finding by Asset Tag, the Tag is a required field in Snipe and Optional in Netbox
-        device = next((item for item in netbox_devices if item["asset_tag"] == snipe_asset['asset_tag']), None)
+        device = next((item for item in netbox_devices if item["asset_tag"] and item["asset_tag"] == snipe_asset['asset_tag']), None)
         if device is not None:
             # check if updating is allowed, then check changed fields and update
-            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, True)
+            self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, nb_status, True)
             return
 
 
-        # Try finding device by Name and Tenant, Netbox has a unique constraint to that two fields
-        device = next((item for item in netbox_devices if (item["name"] == snipe_asset['name'] and item['tenant'] is not None and item['tenant']['id'] == nb_tenant['id'])), None)
-        # If a device with the same Name and Tenant is found, we can not differentiate which snipe Device is which netbox Device, so we add the Asset Tag to the Name and create a new Device
-        if device is not None:
-            name = "{} {}".format(snipe_asset['name'], snipe_asset['asset_tag'])
+        if unique and update_unique_existing:
+            # Try finding device by Name and Tenant, Netbox has a unique constraint to that two fields
+            device = next((item for item in netbox_devices if (item["name"] and item["name"].lower().strip() == snipe_asset['name'].lower().strip() and item['tenant'] is not None and item['tenant']['id'] == nb_tenant['id'])), None)
+            # If a device with the same Name and Tenant is found update it
+            if device is not None:
+                # check if updating is allowed, then check changed fields and update
+                self.__update_device(device, snipe_asset, nb_role, nb_site, nb_tenant, nb_device_type, nb_status, True)
+                return
+                
+        # if no device is found with same uniqe name and same tenant we add the Asset Tag to the Name and create a new Device
+        if snipe_asset['name']:
+            if unique and (update_unique_existing or no_append_assettag):
+                name = snipe_asset['name']
+            else:
+                name = "{} {}".format(snipe_asset['name'], snipe_asset['asset_tag'])
         else:
-            name = snipe_asset['name']
+            name = snipe_asset['asset_tag']
 
-        logging.info("Adding Device to netbox")
+        logging.info("Adding Device to netbox, name {}".format(name))
         device = self.netbox.dcim.devices.create(name=name,
                                                  comments="Notes from SnipeIT when initially creating this Netbox Entry. "
-                                                          "(It will not be Updated on further syncs):\n\n " +
+                                                          "\n " +
                                                           str(snipe_asset['notes']).replace('\r\n', '\r\n\r\n'),
                                                  description=self.desc,
-                                                 status='active',
-                                                 site=nb_site['id'],
+                                                 status=nb_status,
+                                                 site=nb_site['id'] if nb_site else 1,
                                                  asset_tag=snipe_asset['asset_tag'],
-                                                 device_role=nb_role['id'],
+                                                 role=nb_role['id'],
                                                  serial=snipe_asset['serial'],
                                                  device_type=nb_device_type['id'],
                                                  tenant=nb_tenant['id'] if nb_tenant is not None else None,
