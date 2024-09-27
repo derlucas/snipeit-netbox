@@ -62,7 +62,7 @@ class Syncer:
     def ensure_netbox_custom_field(self, lock: bool = False):
         content_types = ['dcim.device', 'dcim.devicetype', 'dcim.interface', 'dcim.manufacturer', 'dcim.site', 'dcim.devicerole',
                          'dcim.location', 'tenancy.tenant']
-        cufi = {"name": KEY_CUSTOM_FIELD, "display": "Snipe object id", "content_types": content_types,
+        cufi = {"name": KEY_CUSTOM_FIELD, "display": "Snipe object id", "object_types": content_types,
                 "description": "The ID of the original SnipeIT Object used for Sync",
                 "type": "integer", "ui_visibility": "read-only" if lock else "read-write"}
 
