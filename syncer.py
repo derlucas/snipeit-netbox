@@ -462,8 +462,8 @@ class Syncer:
         if nb_site and nb_device['site']['id'] != nb_site['id']:
             update_dict = update_dict | {'site': nb_site['id']}
 
-        if nb_device['device_role']['id'] != nb_role['id']:
-            update_dict = update_dict | {'device_role': nb_role['id']}
+        if nb_device['role']['id'] != nb_role['id']:
+            update_dict = update_dict | {'role': nb_role['id']}
 
         if nb_tenant and nb_device['tenant'] and nb_device['tenant']['id'] != nb_tenant['id']:
             update_dict = update_dict | {'tenant': nb_tenant['id']}
