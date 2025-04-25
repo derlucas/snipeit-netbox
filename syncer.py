@@ -22,6 +22,7 @@ class Syncer:
     @staticmethod
     def slugify(value):
         value = (unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode("ascii"))
+        value = re.sub(r"\+", "plus", value.lower())
         value = re.sub(r"[^\w\s-]", "", value.lower())
         return re.sub(r"[-\s]+", "-", value).strip("-_")
 
@@ -150,6 +151,8 @@ class Syncer:
 
         for model in snipe_models:
             update_obj = {}
+            if (model['model_number'] == "xxxxxxxxxx"):
+                logging.debug("debug me - set breakpoint here")
             logging.info("Checking Device Type {}".format(model['name']))
             # get the manufacturer by Name of the Snipe Model-Manufacturer for later use
             manuf_by_model = next((item for item in netbox_manufacturers if item["name"] == model['manufacturer']['name']), None)
@@ -159,22 +162,29 @@ class Syncer:
 
             if present_nb_devtype is None:  # No associated Device Type found
 
-                # Search by Model+Manufacturer
+                # Search by Model+Manufacturer, but do not update already linked devices
                 present_nb_devtype = next((item for item in netbox_device_types if item['model'].lower().strip() == model['name'].lower().strip() and
-                                           item['manufacturer']['name'].lower().strip() == model['manufacturer']['name'].lower().strip()), None)
+                                           item['manufacturer']['name'].lower().strip() == model['manufacturer']['name'].lower().strip() and
+                                           item['custom_fields'][KEY_CUSTOM_FIELD] == None), None)
 
                 if present_nb_devtype is None:
                     logging.info("Adding Device Type {} to netbox".format(model['name']))
 
-                    self.netbox.dcim.device_types.create(slug=Syncer.slugify(model['name']),
+                    try:
+                        slug=Syncer.slugify(model['name']+" "+(model['model_number'] if model['model_number'] else ""))
+                        self.netbox.dcim.device_types.create(slug=slug,
                                                          description=self.desc, model=model['name'],
-                                                         part_number=model['model_number'],
+                                                         part_number=(model['model_number'] if model['model_number'] else ""),
                                                          manufacturer=manuf_by_model.id,
                                                          custom_fields={KEY_CUSTOM_FIELD: model['id']},
                                                          comments="Notes from SnipeIT when initially creating this Netbox Entry. "
                                                                   "\n " +
                                                                   str(model['notes']).replace('\r\n', '\r\n\r\n'),
                                                          is_full_depth=False, u_height=0.0)
+                    except Exception as e:
+                        logging.error("---------------------------------------------------------")
+                        logging.error("Error importing/updating Device Type, slug duplicate: Slug '{}', Manuf: '{}'".format(slug, manuf_by_model['name']))
+                        logging.error(e)
                 else:
                     # Found Device Type by Mode+Manufacturer, so update the Custom Field ID-Value for proper linking
                     if self.allow_linking:
@@ -189,11 +199,11 @@ class Syncer:
             else:
                 # Found associated Device Type, check if things have changed
 
-                if present_nb_devtype['model'] != model['name']:
+                if present_nb_devtype['model'] != model['name'].strip():
                     update_obj = update_obj | {"id": present_nb_devtype["id"], "model": model['name'], "slug": Syncer.slugify(model['name'])}
 
-                if present_nb_devtype['part_number'] != model['model_number']:
-                    update_obj = update_obj | {"id": present_nb_devtype["id"], "part_number": model['model_number']}
+                if present_nb_devtype['part_number'] != (model['model_number'].strip() if model['model_number'] else ""):
+                    update_obj = update_obj | {"id": present_nb_devtype["id"], "part_number": (model['model_number'] if model['model_number'] else "")}
 
                 if present_nb_devtype['manufacturer']['id'] != manuf_by_model.id:
                     update_obj = update_obj | {"id": present_nb_devtype["id"], "manufacturer": manuf_by_model.id}
@@ -388,7 +398,7 @@ class Syncer:
         for snipe_asset in snipe_assets:
             logging.info("Checking Asset: {} Tag: {}".format(snipe_asset['name'], snipe_asset['asset_tag']))
             if snipe_asset['name'] == "xxxxxxxxxxxxxx":
-                logging.info("debug me - set breakpoint here")
+                logging.debug("debug me - set breakpoint here")
 
             if update_unique_existing or no_append_assettag:
                 # check if the name is unique in snipeit
@@ -410,7 +420,9 @@ class Syncer:
             #       the property "assigned_to" contains e.g. "{'id': 76, 'name': '530 Verwaltung/Oper', 'type': 'location'}"
             # if the found location is a site, set site, but not location (this ensures that already existing devices with location can be updated)
 
-            if snipe_asset['location']:
+            if snipe_asset['assigned_to']:
+                locationId = snipe_asset['assigned_to']['id']
+            elif snipe_asset['location']:
                 locationId = snipe_asset['location']['id']
             elif snipe_asset['rtd_location']:
                 locationId = snipe_asset['rtd_location']['id']
